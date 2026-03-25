@@ -111,4 +111,7 @@ def index():
                            search_lat=lat, search_lon=lon)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Use the port Railway provides, or 5000 for local testing
+    port = int(os.environ.get("PORT", 5000))
+    # '0.0.0.0' allows the app to be reachable externally
+    app.run(host='0.0.0.0', port=port, debug=False)
