@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TfL: Find my nearest</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root { --tfl-blue: #0019a8; --tfl-red: #dc241f; --bike-green: #1a7f37; }
+        body { font-family: 'Segoe UI', sans-serif; max-width: 500px; margin: 0 auto; padding: 15px; background: #f4f7f9; color: #333; }
+        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px; }
+        h1 { color: var(--tfl-blue); text-align: center; margin: 0 0 15px 0; font-size: 1.4rem; font-weight: 800; text-transform: uppercase; letter-spacing: -0.5px; }
+        
+        .search-wrap { position: relative; display: flex; align-items: center; margin-bottom: 12px; }
+        input[type="text"] { width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-size: 16px; outline: none; }
+        .gps-btn { position: absolute; right: 10px; background: none; border: none; cursor: pointer; padding: 5px; }
+        .gps-btn svg { width: 22px; height: 22px; fill: #666; }
+
+        .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0; }
+        .chip { background: #eee; padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: bold; border: 1px solid transparent; }
+        .chip input { display: none; }
+        .chip:has(input:checked) { background: var(--tfl-blue); color: white; }
+
+        .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
+        .control-label { font-size: 12px; font-weight: bold; color: #666; margin-bottom: 5px; display: block; }
+
+        .btn-go { width: 100%; padding: 14px; background: var(--tfl-blue); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 16px; }
+        #map { height: 250px; width: 100%; border-radius: 12px; margin-bottom: 15px; display: none; border: 1px solid #ddd; z-index: 1; }
+
+        .stop-card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 12px; border-left: 6px solid var(--tfl-blue); display: flex; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.04); }
+        .bike-card { border-left-color: var(--bike-green); }
+        .bike-pill { background: #e6ffed; color: var(--bike-green); border: 1px solid #b2f2bb; padding: 4px 8px; border-radius: 6px; font-size: 0.8em; font-weight: bold; display: inline-block; margin-top: 5px; }
+        
+        .meta { text-align: right; min-width: 80px; }
+        .dist { font-weight: 800; font-size: 0.85em; background: #eee; padding: 3px 7px; border-radius: 5px; }
+        .walk { font-size: 0.75em; font-weight: bold; color: var(--tfl-blue); margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <h1>TfL: Find my nearest</h1>
+
+    <div class="card">
+        <form id="searchForm" action="/" method="GET">
+            <div class="search-wrap">
+                <input type="text" name="query" id="q" placeholder="Postcode or Location..." value="{{ query }}" required>
+                <button type="button" class="gps-btn" onclick="getGPS()"><svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button>
+            </div>
+
+            <div class="filters">
+                <label class="chip"><input type="checkbox" name="modes" value="tube" {% if 'tube' in selected_modes %}checked{% endif %}> Tube</label>
+                <label class="chip"><input type="checkbox" name="modes" value="bus" {% if 'bus' in selected_modes %}checked{% endif %}> Bus</label>
+                <label class="chip"><input type="checkbox" name="modes" value="train" {% if 'train' in selected_modes %}checked{% endif %}> Rail</label>
+                <label class="chip"><input type="checkbox" name="modes" value="cycle" {% if 'cycle' in selected_modes %}checked{% endif %}> Cycle Hire</label>
+            </div>
+
+            <div class="controls-grid">
+                <div>
+                    <label class="control-label">Radius: <span id="rV">{{ radius }}</span>m</label>
+                    <input type="range" name="radius" min="200" max="2000" step="100" value="{{ radius }}" oninput="rV.innerText = this.value" style="width:100%">
+                </div>
+                <div>
+                    <label class="control-label">Show: <span id="lV">{{ limit }}</span> results</label>
+                    <input type="range" name="limit" min="1" max="10" step="1" value="{{ limit }}" oninput="lV.innerText = this.value" style="width:100%">
+                </div>
+            </div>
+            
+            <button type="submit" class="btn-go">Find Nearest</button>
+        </form>
+    </div>
+
+    <div id="map"></div>
+
+    {% if error %}<p style="color:var(--tfl-red); text-align:center; font-weight:bold;">{{ error }}</p>{% endif %}
+
+    <div id="results">
+        {% for stop in stops %}
+        <div class="stop-card {% if stop.is_bike %}bike-card{% endif %}">
+            <div style="flex:1">
+                <div style="font-weight:bold;">{{ stop.commonName }}</div>
+                <div style="font-size:0.7em; color:var(--tfl-red); font-weight:bold; text-transform:uppercase; margin-top:2px;">
+                    {{ stop.modes | join(' • ') }}
+                </div>
+                {% if stop.is_bike %}<div class="bike-pill">{{ stop.status_msg }}</div>{% endif %}
+                <div style="margin-top:8px;"><a href="https://www.google.com/maps/dir/?api=1&destination={{ stop.lat }},{{ stop.lon }}&travelmode=walking" target="_blank" style="font-size:0.7em; color:var(--tfl-blue); text-decoration:none; font-weight:bold;">GET DIRECTIONS ➔</a></div>
+            </div>
+            <div class="meta">
+                <div class="dist">{{ stop.distance | int }}m</div>
+                <div class="walk">⌛ {{ stop.walk_min }} min</div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <script>
+        function getGPS() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    document.getElementById('q').value = pos.coords.latitude.toFixed(5) + "," + pos.coords.longitude.toFixed(5);
+                    document.getElementById('searchForm').submit();
+                });
+            }
+        }
+
+        {% if search_lat and search_lon %}
+        document.getElementById('map').style.display = 'block';
+        var map = L.map('map').setView([{{ search_lat }}, {{ search_lon }}], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        var redIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+        var greenIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+        var blueIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+
+        var pts = [[{{ search_lat }}, {{ search_lon }}]];
+        L.marker(pts[0], {icon: redIcon}).addTo(map).bindPopup("Your Location");
+
+        {% for stop in stops %}
+            var p = [{{ stop.lat }}, {{ stop.lon }}];
+            pts.push(p);
+            L.marker(p, {icon: {% if stop.is_bike %}greenIcon{% else %}blueIcon{% endif %}})
+             .addTo(map).bindPopup("<b>{{ stop.commonName }}</b><br>{% if stop.is_bike %}{{ stop.status_msg }}{% else %}{{ stop.walk_min }} min walk{% endif %}");
+        {% endfor %}
+
+        if (pts.length > 1) { map.fitBounds(L.latLngBounds(pts), {padding: [30, 30], maxZoom: 16}); }
+        {% endif %}
+    </script>
+</body>
+</html>
