@@ -1,127 +1,204 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>TfL: Find my nearest</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TfL: Find my nearest</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --tfl-blue: #0019a8; --tfl-red: #dc241f; --bike-green: #1a7f37; }
-        body { font-family: 'Segoe UI', sans-serif; max-width: 500px; margin: 0 auto; padding: 15px; background: #f4f7f9; color: #333; }
-        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px; }
-        h1 { color: var(--tfl-blue); text-align: center; margin: 0 0 15px 0; font-size: 1.4rem; font-weight: 800; text-transform: uppercase; letter-spacing: -0.5px; }
+        .app-grid { display: flex; flex-direction: column; gap: 1rem; }
+        @media (min-width: 1024px) {
+            .app-grid { flex-direction: row; align-items: flex-start; }
+            .sidebar { width: 360px; flex-shrink: 0; position: sticky; top: 4.5rem; }
+            .main-content { flex-grow: 1; }
+        }
         
-        .search-wrap { position: relative; display: flex; align-items: center; margin-bottom: 12px; }
-        input[type="text"] { width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-size: 16px; outline: none; }
-        .gps-btn { position: absolute; right: 10px; background: none; border: none; cursor: pointer; padding: 5px; }
-        .gps-btn svg { width: 22px; height: 22px; fill: #666; }
+        /* TfL Brand Styles */
+        .line-badge { px-2.5 py-1 rounded-lg text-[10px] font-black uppercase; display: inline-block; border-radius: 6px; }
+        .line-special-overground { border: 2px solid #ef7b10; background: white; color: #ef7b10; padding: 2px 8px; font-weight: 900; }
+        .line-special-tram { border: 2px solid #84b817; background: white; color: #84b817; padding: 2px 8px; font-weight: 900; }
 
-        .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0; }
-        .chip { background: #eee; padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: bold; border: 1px solid transparent; }
-        .chip input { display: none; }
-        .chip:has(input:checked) { background: var(--tfl-blue); color: white; }
-
-        .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
-        .control-label { font-size: 12px; font-weight: bold; color: #666; margin-bottom: 5px; display: block; }
-
-        .btn-go { width: 100%; padding: 14px; background: var(--tfl-blue); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 16px; }
-        #map { height: 250px; width: 100%; border-radius: 12px; margin-bottom: 15px; display: none; border: 1px solid #ddd; z-index: 1; }
-
-        .stop-card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 12px; border-left: 6px solid var(--tfl-blue); display: flex; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.04); }
-        .bike-card { border-left-color: var(--bike-green); }
-        .bike-pill { background: #e6ffed; color: var(--bike-green); border: 1px solid #b2f2bb; padding: 4px 8px; border-radius: 6px; font-size: 0.8em; font-weight: bold; display: inline-block; margin-top: 5px; }
+        #map { height: 400px; border-radius: 1.5rem; width: 100%; z-index: 10; border: 4px solid white; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); }
+        .stop-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border-left: 0 solid transparent; }
+        .stop-card.highlight { border-color: #1d4ed8; background-color: #f8fafc; border-left-width: 8px; transform: scale(1.01); }
         
-        .meta { text-align: right; min-width: 80px; }
-        .dist { font-weight: 800; font-size: 0.85em; background: #eee; padding: 3px 7px; border-radius: 5px; }
-        .walk { font-size: 0.75em; font-weight: bold; color: var(--tfl-blue); margin-top: 5px; }
+        .mode-label { transition: all 0.2s; border: 2px solid #f1f5f9; font-size: 11px; padding: 0.75rem 0.5rem; }
+        .mode-label.active { background-color: #1d4ed8; border-color: #1d4ed8; color: white; }
+        
+        .overlay-loader { display:none; position: fixed; inset: 0; background: rgba(255,255,255,0.85); z-index: 1000; align-items: center; justify-content: center; flex-direction: column; }
     </style>
 </head>
-<body>
+<body class="bg-slate-50 min-h-screen">
 
-    <h1>TfL: Find my nearest</h1>
-
-    <div class="card">
-        <form id="searchForm" action="/" method="GET">
-            <div class="search-wrap">
-                <input type="text" name="query" id="q" placeholder="Postcode or Location..." value="{{ query }}" required>
-                <button type="button" class="gps-btn" onclick="getGPS()"><svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button>
-            </div>
-
-            <div class="filters">
-                <label class="chip"><input type="checkbox" name="modes" value="tube" {% if 'tube' in selected_modes %}checked{% endif %}> Tube</label>
-                <label class="chip"><input type="checkbox" name="modes" value="bus" {% if 'bus' in selected_modes %}checked{% endif %}> Bus</label>
-                <label class="chip"><input type="checkbox" name="modes" value="train" {% if 'train' in selected_modes %}checked{% endif %}> Rail</label>
-                <label class="chip"><input type="checkbox" name="modes" value="cycle" {% if 'cycle' in selected_modes %}checked{% endif %}> Cycle Hire</label>
-            </div>
-
-            <div class="controls-grid">
-                <div>
-                    <label class="control-label">Radius: <span id="rV">{{ radius }}</span>m</label>
-                    <input type="range" name="radius" min="200" max="2000" step="100" value="{{ radius }}" oninput="rV.innerText = this.value" style="width:100%">
-                </div>
-                <div>
-                    <label class="control-label">Show: <span id="lV">{{ limit }}</span> results</label>
-                    <input type="range" name="limit" min="1" max="10" step="1" value="{{ limit }}" oninput="lV.innerText = this.value" style="width:100%">
-                </div>
-            </div>
-            
-            <button type="submit" class="btn-go">Find Nearest</button>
-        </form>
+    <div id="globalLoader" class="overlay-loader">
+        <div class="w-10 h-10 border-4 border-slate-200 border-t-blue-700 rounded-full animate-spin"></div>
+        <p class="mt-4 font-black text-blue-900 text-[10px] uppercase tracking-widest">Updating results</p>
     </div>
 
-    <div id="map"></div>
-
-    {% if error %}<p style="color:var(--tfl-red); text-align:center; font-weight:bold;">{{ error }}</p>{% endif %}
-
-    <div id="results">
-        {% for stop in stops %}
-        <div class="stop-card {% if stop.is_bike %}bike-card{% endif %}">
-            <div style="flex:1">
-                <div style="font-weight:bold;">{{ stop.commonName }}</div>
-                <div style="font-size:0.7em; color:var(--tfl-red); font-weight:bold; text-transform:uppercase; margin-top:2px;">
-                    {{ stop.modes | join(' • ') }}
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-[100] shadow-sm">
+        <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-3">
+                <div class="w-9 h-9 bg-blue-700 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <i data-lucide="map-pin" class="w-5 h-5"></i>
                 </div>
-                {% if stop.is_bike %}<div class="bike-pill">{{ stop.status_msg }}</div>{% endif %}
-                <div style="margin-top:8px;"><a href="https://www.google.com/maps/dir/?api=1&destination={{ stop.lat }},{{ stop.lon }}&travelmode=walking" target="_blank" style="font-size:0.7em; color:var(--tfl-blue); text-decoration:none; font-weight:bold;">GET DIRECTIONS ➔</a></div>
+                <h1 class="font-black text-blue-900 text-lg uppercase tracking-tight">TfL: Find my nearest</h1>
+            </a>
+        </div>
+    </nav>
+
+    <div class="max-w-6xl mx-auto p-4 lg:p-8">
+        <div class="app-grid">
+            <div class="sidebar">
+                <section class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                    <form id="searchForm" action="/" method="GET">
+                        <div class="relative mb-4">
+                            <input type="text" name="query" id="q" placeholder="Postcode or Station..." value="{{ query }}" required
+                                class="w-full pl-4 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-600 outline-none font-bold text-base transition-all">
+                            <button type="button" onclick="getGPS()" class="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-blue-600"><i data-lucide="locate-fixed" class="w-5 h-5"></i></button>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-2 mb-6">
+                            {% set icon_map = {'tube':'train-front-tunnel','bus':'bus','train':'train','cycle':'bike'} %}
+                            {% for val, label in [('tube','Tube'),('bus','Bus'),('train','Rail'),('cycle','Bike')] %}
+                            <label class="mode-label flex flex-col items-center justify-center gap-2 rounded-2xl cursor-pointer font-bold {{ 'active' if val in selected_modes else 'bg-white text-slate-400' }}">
+                                <input type="checkbox" name="modes" value="{{ val }}" class="hidden" {{ 'checked' if val in selected_modes }} onchange="autoSubmit()">
+                                <i data-lucide="{{ icon_map[val] }}" class="w-5 h-5"></i>
+                                <span class="tracking-tight uppercase text-[9px]">{{ label }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-6 mb-6">
+                            <div class="space-y-2">
+                                <div class="flex justify-between text-[10px] font-black uppercase text-slate-400"><span>Radius</span><span class="text-blue-700 font-bold" id="radDisplay">{{ radius }}m</span></div>
+                                <input type="range" name="radius" id="radSlider" min="200" max="2000" step="100" value="{{ radius }}" onchange="autoSubmit()" oninput="updateRad(this.value)" class="w-full h-2 bg-slate-100 rounded-lg appearance-none accent-blue-700 cursor-pointer">
+                            </div>
+                            <div class="space-y-2">
+                                <div class="flex justify-between text-[10px] font-black uppercase text-slate-400"><span>Limit</span><span class="text-blue-700 font-bold" id="limDisplay">{{ limit }}</span></div>
+                                <input type="range" name="limit" id="limSlider" min="1" max="15" step="1" value="{{ limit }}" onchange="autoSubmit()" oninput="updateLim(this.value)" class="w-full h-2 bg-slate-100 rounded-lg appearance-none accent-blue-700 cursor-pointer">
+                            </div>
+                        </div>
+
+                        <button type="submit" onclick="showLoader()" class="w-full py-4 bg-blue-700 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-all">
+                            Search Location
+                        </button>
+                    </form>
+                </section>
             </div>
-            <div class="meta">
-                <div class="dist">{{ stop.distance | int }}m</div>
-                <div class="walk">⌛ {{ stop.walk_min }} min</div>
+
+            <div class="main-content space-y-4">
+                <div id="map" class="{% if not search_lat %}hidden{% endif %}"></div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% for stop in stops %}
+                    <div id="card-{{ loop.index0 }}" class="stop-card bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                        <div class="flex justify-between items-start mb-4">
+                            <div class="flex items-center gap-4">
+                                <div class="p-3 bg-slate-50 rounded-xl text-slate-600 shrink-0">
+                                    {% if stop.is_bike %}<i data-lucide="bike" class="w-6 h-6 text-emerald-600"></i>
+                                    {% elif stop.primary_mode == 'tube' %}<i data-lucide="train-front-tunnel" class="w-6 h-6 text-blue-800"></i>
+                                    {% elif stop.primary_mode == 'bus' %}<i data-lucide="bus" class="w-6 h-6 text-red-600"></i>
+                                    {% else %}<i data-lucide="train" class="w-6 h-6 text-indigo-950"></i>{% endif %}
+                                </div>
+                                <h4 class="font-black text-slate-800 leading-tight text-sm md:text-base">{{ stop.commonName }}</h4>
+                            </div>
+                            <div class="text-right shrink-0">
+                                <span class="block text-2xl font-black text-blue-900 leading-none">{{ stop.walk_min }}<small class="text-[10px] uppercase ml-1 opacity-40">min</small></span>
+                                <span class="text-[9px] text-slate-400 uppercase font-bold tracking-wider">{{ stop.distance|int }}m walk</span>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap gap-2 mb-5">
+                            {% if stop.is_bike %}<span class="text-emerald-600 text-[10px] font-black uppercase tracking-widest">{{ stop.status_msg }}</span>
+                            {% else %}
+                                {% for line in stop.lines %}
+                                    <span class="px-3 py-1 rounded-lg text-[9px] font-black uppercase 
+                                          {{ 'border-2 border-red-600 text-red-600' if stop.primary_mode == 'bus' }}
+                                          {{ 'line-special-overground' if line.color == 'special-overground' }}
+                                          {{ 'line-special-tram' if line.color == 'special-tram' }} 
+                                          {{ 'text-white' if stop.primary_mode != 'bus' and 'special' not in line.color }}" 
+                                          style="{% if stop.primary_mode != 'bus' and 'special' not in line.color %}background-color: {{ line.color }}{% endif %}">
+                                        {{ line.name }}
+                                    </span>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+
+                        <a href="https://www.google.com/maps/dir/?api=1&destination={{stop.lat}},{{stop.lon}}&travelmode=walking" 
+                           target="_blank" class="text-center py-3 bg-slate-50 hover:bg-blue-600 hover:text-white text-blue-700 text-[10px] font-black uppercase tracking-widest rounded-xl border border-slate-100 transition-all">
+                            Directions ➔
+                        </a>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                {% if line_statuses %}
+                <section class="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm">
+                    <h3 class="text-slate-400 font-black text-[10px] uppercase mb-4 tracking-[0.2em]">Live Service Alerts</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {% for s in line_statuses %}
+                        <a href="https://tfl.gov.uk/tube-dlr-overground/status/#line-{{ s.id }}" target="_blank" 
+                           class="flex items-center justify-between p-3 rounded-xl border-l-4 text-[11px] font-bold transition-all hover:bg-slate-50 group" 
+                           style="border-color: {% if s.color == 'special-overground' %}#ef7b10{% elif s.color == 'special-tram' %}#84b817{% else %}{{s.color}}{% endif %};">
+                            <span class="truncate pr-4 uppercase" style="color: {% if s.color == 'special-overground' %}#ef7b10{% elif s.color == 'special-tram' %}#84b817{% else %}{{s.color}}{% endif %};">{{ s.name }}</span>
+                            <span class="text-slate-500 font-medium shrink-0 flex items-center gap-1">{{ s.description }} <i data-lucide="external-link" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity"></i></span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
             </div>
         </div>
-        {% endfor %}
     </div>
 
     <script>
+        lucide.createIcons();
+        function showLoader() { document.getElementById('globalLoader').style.display = 'flex'; }
+        function autoSubmit() { if (document.getElementById('q').value.trim() !== "") { showLoader(); document.getElementById('searchForm').submit(); } }
+        function updateRad(val) { document.getElementById('radDisplay').textContent = val + 'm'; }
+        function updateLim(val) { document.getElementById('limDisplay').textContent = val; }
+
         function getGPS() {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition((pos) => {
                     document.getElementById('q').value = pos.coords.latitude.toFixed(5) + "," + pos.coords.longitude.toFixed(5);
-                    document.getElementById('searchForm').submit();
+                    autoSubmit();
                 });
             }
         }
 
         {% if search_lat and search_lon %}
-        document.getElementById('map').style.display = 'block';
-        var map = L.map('map').setView([{{ search_lat }}, {{ search_lon }}], 15);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-
-        var redIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png', iconSize: [25, 41], iconAnchor: [12, 41] });
-        var greenIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
-        var blueIcon = L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
-
+        var map = L.map('map', {zoomControl: false}).setView([{{ search_lat }}, {{ search_lon }}], 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+        
         var pts = [[{{ search_lat }}, {{ search_lon }}]];
-        L.marker(pts[0], {icon: redIcon}).addTo(map).bindPopup("Your Location");
+        L.circleMarker(pts[0], { radius: 10, color: '#334155', weight: 4, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
 
         {% for stop in stops %}
-            var p = [{{ stop.lat }}, {{ stop.lon }}];
-            pts.push(p);
-            L.marker(p, {icon: {% if stop.is_bike %}greenIcon{% else %}blueIcon{% endif %}})
-             .addTo(map).bindPopup("<b>{{ stop.commonName }}</b><br>{% if stop.is_bike %}{{ stop.status_msg }}{% else %}{{ stop.walk_min }} min walk{% endif %}");
+            (function(){
+                var idx = {{ loop.index0 }};
+                var p = [{{ stop.lat }}, {{ stop.lon }}]; pts.push(p);
+                var pinColor = '#000000'; // Rail/Overground Default
+                var mode = '{{ stop.primary_mode }}';
+                if ({{ 'true' if stop.is_bike else 'false' }}) pinColor = '#10b981';
+                else if (mode === 'bus') pinColor = '#dc241f';
+                else if (mode === 'tube') pinColor = '#0019a8';
+
+                var m = L.circleMarker(p, { radius: 8, color: pinColor, weight: 3, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+                m.bindTooltip("{{ stop.commonName }}", { direction: 'top', offset: [0, -5] });
+                m.on('click', function() {
+                    document.querySelectorAll('.stop-card').forEach(c => c.classList.remove('highlight'));
+                    const card = document.getElementById('card-' + idx);
+                    card.classList.add('highlight');
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                });
+            })();
         {% endfor %}
 
-        if (pts.length > 1) { map.fitBounds(L.latLngBounds(pts), {padding: [30, 30], maxZoom: 16}); }
+        if (pts.length > 1) { map.fitBounds(L.latLngBounds(pts), { padding: [50, 50] }); }
         {% endif %}
     </script>
 </body>

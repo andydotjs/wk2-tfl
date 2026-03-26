@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 app = Flask(__name__)
+
 TFL_API_KEY = os.getenv("TFL_API_KEY")
 
 MODE_MAP = {
@@ -14,52 +15,95 @@ MODE_MAP = {
     'train': 'NaptanRailStation'
 }
 
-def get_stops_by_coords(lat, lon, radius, selected_modes):
-    type_list = [MODE_MAP[m] for m in selected_modes if m in MODE_MAP]
-    if not type_list: return []
-    
-    url = "https://api.tfl.gov.uk/StopPoint/"
-    params = {
-        "lat": lat, "lon": lon,
-        "stopTypes": ",".join(type_list),
-        "radius": int(radius),
-        "useStopPointHierarchy": "True"
-    }
+TFL_COLORS = {
+    'Bakerloo': '#B26300', 'Central': '#E32017', 'Circle': '#FFD300',
+    'District': '#00782A', 'Hammersmith & City': '#F3A9BB', 'Jubilee': '#A0A5A9',
+    'Metropolitan': '#9B0056', 'Northern': '#000000', 'Piccadilly': '#003688',
+    'Victoria': '#0098D4', 'Waterloo & City': '#95CDBA', 'Elizabeth line': '#6950A1',
+    'London Overground': 'special-overground',
+    'DLR': '#00AFAD', 
+    'Tram': 'special-tram',
+    'National Rail': '#003399', 
+    'Bus': '#DC241F'
+}
+
+def get_line_statuses():
+    url = "https://api.tfl.gov.uk/line/mode/tube,overground,dlr,elizabeth-line/status"
     try:
-        resp = requests.get(url, params=params, headers={"app_key": TFL_API_KEY}, timeout=10)
+        resp = requests.get(url, params={"app_key": TFL_API_KEY}, timeout=5)
         if resp.status_code == 200:
-            return resp.json().get('stopPoints', [])
+            statuses = []
+            for line in resp.json():
+                status = line['lineStatuses'][0]
+                if status['statusSeverity'] != 10:
+                    statuses.append({
+                        'name': line['name'],
+                        'id': line['id'],
+                        'description': status['statusSeverityDescription'],
+                        'color': TFL_COLORS.get(line['name'], '#0019a8')
+                    })
+            return statuses
     except: pass
     return []
 
-def get_bikes_by_coords(lat, lon, radius):
-    url = "https://api.tfl.gov.uk/Place"
-    params = {"type": "BikePoint", "lat": lat, "lon": lon, "radius": radius}
-    clean_bikes = []
-    try:
-        resp = requests.get(url, params=params, headers={"app_key": TFL_API_KEY}, timeout=10)
-        data = resp.json()
-        bike_list = data.get('places', []) if isinstance(data, dict) else data if isinstance(data, list) else []
+def get_nearby_transport(lat, lon, radius, selected_modes):
+    all_results = []
+    type_list = [MODE_MAP[m] for m in selected_modes if m in MODE_MAP]
+    
+    if type_list:
+        url = "https://api.tfl.gov.uk/StopPoint/"
+        params = {"lat": lat, "lon": lon, "stopTypes": ",".join(type_list), "radius": int(radius), "app_key": TFL_API_KEY}
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            if resp.status_code == 200:
+                for s in resp.json().get('stopPoints', []):
+                    modes = s.get('modes', [])
+                    
+                    # Logic Fix: Categorize Tube/DLR/Liz as 'tube', Overground/Rail as 'train'
+                    if any(m in ['tube', 'elizabeth-line', 'dlr'] for m in modes):
+                        primary = 'tube'
+                    elif any(m in ['national-rail', 'overground', 'train'] for m in modes):
+                        primary = 'train'
+                    else:
+                        primary = 'bus'
+                    
+                    line_data = []
+                    seen_lines = set()
+                    for l in s.get('lines', []):
+                        name = l.get('name')
+                        if name and name not in seen_lines:
+                            line_data.append({'name': name, 'color': TFL_COLORS.get(name, '#0019a8')})
+                            seen_lines.add(name)
 
-        for b in bike_list:
-            props = {p.get('key'): p.get('value') for p in b.get('additionalProperties', [])}
-            try:
-                bikes = int(props.get('NbBikes') or props.get('nbBikes') or 0)
-                docks = int(props.get('NbEmptyDocks') or props.get('nbEmptyDocks') or 0)
-            except:
-                bikes, docks = 0, 0
+                    all_results.append({
+                        'id': s.get('id'),
+                        'commonName': s.get('commonName'),
+                        'lat': s.get('lat'), 'lon': s.get('lon'),
+                        'distance': float(s.get('distance', 0)),
+                        'lines': line_data, 'primary_mode': primary, 'is_bike': False
+                    })
+        except: pass
 
-            clean_bikes.append({
-                'commonName': b.get('commonName', 'Unknown Dock'),
-                'lat': b.get('lat'),
-                'lon': b.get('lon'),
-                'distance': float(b.get('distance', 9999)),
-                'modes': ['cycle-hire'],
-                'status_msg': f"🚲 {bikes} bikes • 🅿️ {docks} empty docks",
-                'is_bike': True
-            })
-    except: pass
-    return clean_bikes
+    if 'cycle' in selected_modes:
+        url = "https://api.tfl.gov.uk/Place"
+        params = {"type": "BikePoint", "lat": lat, "lon": lon, "radius": radius, "app_key": TFL_API_KEY}
+        try:
+            resp = requests.get(url, params=params, timeout=5)
+            data = resp.json()
+            bike_list = data if isinstance(data, list) else data.get('places', [])
+            for b in bike_list:
+                props = {p.get('key'): p.get('value') for p in b.get('additionalProperties', [])}
+                all_results.append({
+                    'id': b.get('id'),
+                    'commonName': b.get('commonName'),
+                    'lat': b.get('lat'), 'lon': b.get('lon'),
+                    'distance': float(b.get('distance', 9999)),
+                    'status_msg': f"{props.get('NbBikes', 0)} bikes available",
+                    'is_bike': True, 'primary_mode': 'cycle'
+                })
+        except: pass
+
+    return sorted(all_results, key=lambda x: x['distance'])
 
 def resolve_search(query):
     query = query.strip()
@@ -69,10 +113,12 @@ def resolve_search(query):
             res = p_resp.json()['result']
             return res['latitude'], res['longitude'], None
     except: pass
+    
     coords = re.findall(r"-?\d+\.\d+", query)
     if len(coords) == 2: return coords[0], coords[1], None
+    
     try:
-        t_resp = requests.get(f"https://api.tfl.gov.uk/StopPoint/Search/{query}", headers={"app_key": TFL_API_KEY}, timeout=5)
+        t_resp = requests.get(f"https://api.tfl.gov.uk/StopPoint/Search/{query}", params={"app_key": TFL_API_KEY}, timeout=5)
         if t_resp.status_code == 200:
             matches = t_resp.json().get('matches', [])
             if matches: return matches[0]['lat'], matches[0]['lon'], None
@@ -87,31 +133,18 @@ def index():
     selected_modes = request.args.getlist('modes') or ['tube', 'bus']
     
     stops, error, lat, lon = [], None, None, None
+    line_statuses = get_line_statuses() if query else []
 
     if query:
-        lat, lon, s_error = resolve_search(query)
-        if s_error:
-            error = s_error
-        elif lat and lon:
-            # FIX: Only expecting one return value from get_stops_by_coords now
-            if any(m in MODE_MAP for m in selected_modes):
-                t_results = get_stops_by_coords(lat, lon, radius, selected_modes)
-                stops.extend(t_results)
-            
-            if 'cycle' in selected_modes:
-                stops.extend(get_bikes_by_coords(lat, lon, radius))
-            
-            stops = sorted(stops, key=lambda x: float(x.get('distance', 9999)))[:limit]
-            
+        lat, lon, error = resolve_search(query)
+        if lat and lon:
+            stops = get_nearby_transport(lat, lon, radius, selected_modes)[:limit]
             for s in stops:
-                s['walk_min'] = max(1, round(float(s.get('distance', 0)) / 80))
-            
-    return render_template('index.html', stops=stops, query=query, radius=radius, 
-                           limit=limit, error=error, selected_modes=selected_modes,
-                           search_lat=lat, search_lon=lon)
+                s['walk_min'] = max(1, round((s['distance'] * 1.3) / 80))
+                
+    return render_template('index.html', stops=stops, query=query, radius=radius, limit=limit, 
+                           error=error, selected_modes=selected_modes, search_lat=lat, 
+                           search_lon=lon, line_statuses=line_statuses)
 
 if __name__ == '__main__':
-    # Use the port Railway provides, or 5000 for local testing
-    port = int(os.environ.get("PORT", 5000))
-    # '0.0.0.0' allows the app to be reachable externally
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=5000)
