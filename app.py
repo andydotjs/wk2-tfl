@@ -147,4 +147,7 @@ def index():
                            search_lon=lon, line_statuses=line_statuses)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Use the port Railway provides, or 5000 for local testing
+    port = int(os.environ.get("PORT", 5000))
+    # '0.0.0.0' allows the app to be reachable externally
+    app.run(host='0.0.0.0', port=port, debug=False)
