@@ -3,101 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TfL: Find my nearest</title>
+    <title>TfL: Find My Nearest</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        .app-grid { display: flex; flex-direction: column; gap: 1rem; }
-        @media (min-width: 1024px) {
-            .app-grid { flex-direction: row; align-items: flex-start; }
-            .sidebar { width: 360px; flex-shrink: 0; position: sticky; top: 4.5rem; }
-            .main-content { flex-grow: 1; }
-        }
+        .line-badge { font-weight: 900; text-transform: uppercase; font-size: 9px; padding: 2px 8px; border-radius: 6px; }
+        .line-special-overground { border: 2px solid #ef7b10; background: white; color: #ef7b10; }
+        .line-special-tram { border: 2px solid #84b817; background: white; color: #84b817; }
+        #map { height: 350px; border-radius: 1.5rem; width: 100%; border: 4px solid white; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); }
+        .stop-card.highlight { border-left: 8px solid #1d4ed8; background-color: #f8fafc; }
+        .mode-chip { transition: all 0.2s; border: 1.5px solid #e2e8f0; font-size: 11px; padding: 0.5rem 0.75rem; border-radius: 9999px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 700; color: #64748b; background: white; }
+        .mode-chip.active { background-color: #1d4ed8; border-color: #1d4ed8; color: white; }
+        .inline-select { background: transparent; border-bottom: 2px dashed #1d4ed8; color: #1d4ed8; font-weight: 900; cursor: pointer; outline: none; }
         
-        /* TfL Brand Styles */
-        .line-badge { px-2.5 py-1 rounded-lg text-[10px] font-black uppercase; display: inline-block; border-radius: 6px; }
-        .line-special-overground { border: 2px solid #ef7b10; background: white; color: #ef7b10; padding: 2px 8px; font-weight: 900; }
-        .line-special-tram { border: 2px solid #84b817; background: white; color: #84b817; padding: 2px 8px; font-weight: 900; }
+        /* Updated Location Input style with Search Icon */
+        .search-container { display: inline-flex; align-items: center; border-bottom: 2px dashed #1d4ed8; margin-left: 4px; }
+        .inline-input { background: transparent; color: #1d4ed8; font-weight: 900; outline: none; width: 160px; text-align: center; }
+        .inline-search-btn { color: #1d4ed8; padding: 0 4px; transition: transform 0.2s; }
+        .inline-search-btn:hover { transform: scale(1.2); }
 
-        #map { height: 400px; border-radius: 1.5rem; width: 100%; z-index: 10; border: 4px solid white; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); }
-        .stop-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border-left: 0 solid transparent; }
-        .stop-card.highlight { border-color: #1d4ed8; background-color: #f8fafc; border-left-width: 8px; transform: scale(1.01); }
-        
-        .mode-label { transition: all 0.2s; border: 2px solid #f1f5f9; font-size: 11px; padding: 0.75rem 0.5rem; }
-        .mode-label.active { background-color: #1d4ed8; border-color: #1d4ed8; color: white; }
-        
-        .overlay-loader { display:none; position: fixed; inset: 0; background: rgba(255,255,255,0.85); z-index: 1000; align-items: center; justify-content: center; flex-direction: column; }
+        .overlay-loader { display:none; position: fixed; inset: 0; background: rgba(255,255,255,0.9); z-index: 1000; align-items: center; justify-content: center; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
 
     <div id="globalLoader" class="overlay-loader">
         <div class="w-10 h-10 border-4 border-slate-200 border-t-blue-700 rounded-full animate-spin"></div>
-        <p class="mt-4 font-black text-blue-900 text-[10px] uppercase tracking-widest">Updating results</p>
     </div>
 
-    <nav class="bg-white border-b border-slate-200 sticky top-0 z-[100] shadow-sm">
-        <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-            <a href="/" class="flex items-center gap-3">
-                <div class="w-9 h-9 bg-blue-700 rounded-xl flex items-center justify-center text-white shadow-lg">
-                    <i data-lucide="map-pin" class="w-5 h-5"></i>
-                </div>
-                <h1 class="font-black text-blue-900 text-lg uppercase tracking-tight">TfL: Find my nearest</h1>
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-[100]">
+        <div class="max-w-4xl mx-auto px-4 h-16">
+            <a href="/" class="flex items-center gap-2 h-full">
+                <div class="w-8 h-8 bg-blue-700 rounded-lg flex items-center justify-center text-white"><i data-lucide="map-pin" class="w-4 h-4"></i></div>
+                <h1 class="font-black text-blue-900 text-lg uppercase tracking-tight">TfL: Find My Nearest</h1>
             </a>
         </div>
     </nav>
 
-    <div class="max-w-6xl mx-auto p-4 lg:p-8">
-        <div class="app-grid">
-            <div class="sidebar">
-                <section class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-                    <form id="searchForm" action="/" method="GET">
-                        <div class="relative mb-4">
-                            <input type="text" name="query" id="q" placeholder="Postcode or Station..." value="{{ query }}" required
-                                class="w-full pl-4 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-600 outline-none font-bold text-base transition-all">
-                            <button type="button" onclick="getGPS()" class="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-blue-600"><i data-lucide="locate-fixed" class="w-5 h-5"></i></button>
-                        </div>
-
-                        <div class="grid grid-cols-4 gap-2 mb-6">
-                            {% set icon_map = {'tube':'train-front-tunnel','bus':'bus','train':'train','cycle':'bike'} %}
-                            {% for val, label in [('tube','Tube'),('bus','Bus'),('train','Rail'),('cycle','Bike')] %}
-                            <label class="mode-label flex flex-col items-center justify-center gap-2 rounded-2xl cursor-pointer font-bold {{ 'active' if val in selected_modes else 'bg-white text-slate-400' }}">
-                                <input type="checkbox" name="modes" value="{{ val }}" class="hidden" {{ 'checked' if val in selected_modes }} onchange="autoSubmit()">
-                                <i data-lucide="{{ icon_map[val] }}" class="w-5 h-5"></i>
-                                <span class="tracking-tight uppercase text-[9px]">{{ label }}</span>
-                            </label>
-                            {% endfor %}
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-6 mb-6">
-                            <div class="space-y-2">
-                                <div class="flex justify-between text-[10px] font-black uppercase text-slate-400"><span>Radius</span><span class="text-blue-700 font-bold" id="radDisplay">{{ radius }}m</span></div>
-                                <input type="range" name="radius" id="radSlider" min="200" max="2000" step="100" value="{{ radius }}" onchange="autoSubmit()" oninput="updateRad(this.value)" class="w-full h-2 bg-slate-100 rounded-lg appearance-none accent-blue-700 cursor-pointer">
-                            </div>
-                            <div class="space-y-2">
-                                <div class="flex justify-between text-[10px] font-black uppercase text-slate-400"><span>Limit</span><span class="text-blue-700 font-bold" id="limDisplay">{{ limit }}</span></div>
-                                <input type="range" name="limit" id="limSlider" min="1" max="15" step="1" value="{{ limit }}" onchange="autoSubmit()" oninput="updateLim(this.value)" class="w-full h-2 bg-slate-100 rounded-lg appearance-none accent-blue-700 cursor-pointer">
-                            </div>
-                        </div>
-
-                        <button type="submit" onclick="showLoader()" class="w-full py-4 bg-blue-700 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-all">
-                            Search Location
+    <div class="max-w-4xl mx-auto p-4 lg:p-8">
+        <form id="searchForm" action="/" method="GET">
+            
+            {% if not query %}
+            <div class="mb-8 space-y-6 pt-12">
+                <p class="text-slate-500 font-medium text-center">Find your nearest London transport links</p>
+                <div class="max-w-xl mx-auto space-y-6">
+                    <button type="button" onclick="getGPS()" class="w-full h-16 bg-blue-700 text-white rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-blue-800 transition-all flex items-center justify-center gap-3 shadow-lg">
+                        <i data-lucide="locate-fixed" class="w-5 h-5"></i> My Current Location
+                    </button>
+                    <div class="relative flex items-center justify-center">
+                        <div class="flex-grow border-t border-slate-200"></div>
+                        <span class="flex-shrink mx-4 text-slate-400 font-black text-[10px] uppercase tracking-widest">OR</span>
+                        <div class="flex-grow border-t border-slate-200"></div>
+                    </div>
+                    <div class="relative">
+                        <input type="text" name="query" id="q" placeholder="Search somewhere else..." required
+                               class="w-full h-16 pl-6 pr-14 bg-white border-2 border-slate-200 rounded-2xl shadow-sm focus:border-blue-600 outline-none font-bold text-base">
+                        <button type="submit" onclick="showLoader()" class="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-blue-700 hover:scale-110 transition-transform">
+                            <i data-lucide="search" class="w-6 h-6"></i>
                         </button>
-                    </form>
-                </section>
+                    </div>
+                </div>
             </div>
+            {% endif %}
 
-            <div class="main-content space-y-4">
-                <div id="map" class="{% if not search_lat %}hidden{% endif %}"></div>
+            {% if query %}
+            <div class="space-y-6">
+                <div id="map"></div>
+
+                <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+                    <div class="flex flex-wrap items-center justify-center gap-x-1 gap-y-3 text-sm font-bold text-slate-600 text-center">
+                        <span>Showing</span>
+                        <select name="limit" onchange="autoSubmit()" class="inline-select">
+                            {% for n in [1, 5, 10, 15, 20] %}
+                            <option value="{{ n }}" {{ 'selected' if limit == n }}>{{ n }}</option>
+                            {% endfor %}
+                        </select>
+                        <span>nearest stops within</span>
+                        <select name="radius" onchange="autoSubmit()" class="inline-select">
+                            <option value="500" {{ 'selected' if radius == 500 }}>500m</option>
+                            <option value="1000" {{ 'selected' if radius == 1000 }}>1km</option>
+                            <option value="2000" {{ 'selected' if radius == 2000 }}>2km</option>
+                            <option value="5000" {{ 'selected' if radius == 5000 }}>5km</option>
+                        </select>
+                        <span>of</span>
+                        <div class="search-container">
+                            <input type="text" name="query" value="{{ query }}" class="inline-input" id="q_inline">
+                            <button type="submit" onclick="showLoader()" class="inline-search-btn">
+                                <i data-lucide="search" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap justify-center gap-2 pt-2 border-t border-slate-100">
+                        {% set icon_map = {'tube':'train-front-tunnel','bus':'bus','train':'train','cycle':'bike'} %}
+                        {% for val, label in [('tube','Tube'),('bus','Bus'),('train','Rail'),('cycle','Bike')] %}
+                        <label class="mode-chip {{ 'active' if val in selected_modes }}">
+                            <input type="checkbox" name="modes" value="{{ val }}" class="hidden" {{ 'checked' if val in selected_modes }} onchange="autoSubmit()">
+                            <i data-lucide="{{ icon_map[val] }}" class="w-3.5 h-3.5"></i> {{ label }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {% for stop in stops %}
-                    <div id="card-{{ loop.index0 }}" class="stop-card bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                    <div id="card-{{ loop.index0 }}" class="stop-card bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between transition-all">
                         <div class="flex justify-between items-start mb-4">
                             <div class="flex items-center gap-4">
-                                <div class="p-3 bg-slate-50 rounded-xl text-slate-600 shrink-0">
+                                <div class="p-3 bg-slate-50 rounded-xl text-slate-600">
                                     {% if stop.is_bike %}<i data-lucide="bike" class="w-6 h-6 text-emerald-600"></i>
                                     {% elif stop.primary_mode == 'tube' %}<i data-lucide="train-front-tunnel" class="w-6 h-6 text-blue-800"></i>
                                     {% elif stop.primary_mode == 'bus' %}<i data-lucide="bus" class="w-6 h-6 text-red-600"></i>
@@ -107,65 +122,51 @@
                             </div>
                             <div class="text-right shrink-0">
                                 <span class="block text-2xl font-black text-blue-900 leading-none">{{ stop.walk_min }}<small class="text-[10px] uppercase ml-1 opacity-40">min</small></span>
-                                <span class="text-[9px] text-slate-400 uppercase font-bold tracking-wider">{{ stop.distance|int }}m walk</span>
+                                <span class="text-[9px] text-slate-400 uppercase font-bold">{{ stop.distance|int }}m</span>
                             </div>
                         </div>
-
                         <div class="flex flex-wrap gap-2 mb-5">
                             {% if stop.is_bike %}<span class="text-emerald-600 text-[10px] font-black uppercase tracking-widest">{{ stop.status_msg }}</span>
                             {% else %}
                                 {% for line in stop.lines %}
-                                    <span class="px-3 py-1 rounded-lg text-[9px] font-black uppercase 
-                                          {{ 'border-2 border-red-600 text-red-600' if stop.primary_mode == 'bus' }}
-                                          {{ 'line-special-overground' if line.color == 'special-overground' }}
-                                          {{ 'line-special-tram' if line.color == 'special-tram' }} 
-                                          {{ 'text-white' if stop.primary_mode != 'bus' and 'special' not in line.color }}" 
-                                          style="{% if stop.primary_mode != 'bus' and 'special' not in line.color %}background-color: {{ line.color }}{% endif %}">
+                                    <span class="line-badge {{ 'line-special-overground' if line.color == 'special-overground' }} {{ 'line-special-tram' if line.color == 'special-tram' }}" 
+                                          style="{% if 'special' not in line.color %}background-color: {{ line.color }}; color: white;{% endif %}">
                                         {{ line.name }}
                                     </span>
                                 {% endfor %}
                             {% endif %}
                         </div>
-
                         <a href="https://www.google.com/maps/dir/?api=1&destination={{stop.lat}},{{stop.lon}}&travelmode=walking" 
-                           target="_blank" class="text-center py-3 bg-slate-50 hover:bg-blue-600 hover:text-white text-blue-700 text-[10px] font-black uppercase tracking-widest rounded-xl border border-slate-100 transition-all">
+                           target="_blank" class="text-center py-3 bg-slate-50 hover:bg-blue-600 hover:text-white text-blue-700 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
                             Directions ➔
                         </a>
                     </div>
+                    {% else %}
+                    <div class="col-span-full p-12 text-center bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                        <p class="text-slate-400 font-bold uppercase tracking-widest text-xs">No transport links found</p>
+                    </div>
                     {% endfor %}
                 </div>
-
-                {% if line_statuses %}
-                <section class="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm">
-                    <h3 class="text-slate-400 font-black text-[10px] uppercase mb-4 tracking-[0.2em]">Live Service Alerts</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {% for s in line_statuses %}
-                        <a href="https://tfl.gov.uk/tube-dlr-overground/status/#line-{{ s.id }}" target="_blank" 
-                           class="flex items-center justify-between p-3 rounded-xl border-l-4 text-[11px] font-bold transition-all hover:bg-slate-50 group" 
-                           style="border-color: {% if s.color == 'special-overground' %}#ef7b10{% elif s.color == 'special-tram' %}#84b817{% else %}{{s.color}}{% endif %};">
-                            <span class="truncate pr-4 uppercase" style="color: {% if s.color == 'special-overground' %}#ef7b10{% elif s.color == 'special-tram' %}#84b817{% else %}{{s.color}}{% endif %};">{{ s.name }}</span>
-                            <span class="text-slate-500 font-medium shrink-0 flex items-center gap-1">{{ s.description }} <i data-lucide="external-link" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity"></i></span>
-                        </a>
-                        {% endfor %}
-                    </div>
-                </section>
-                {% endif %}
             </div>
-        </div>
+            {% endif %}
+        </form>
     </div>
 
     <script>
         lucide.createIcons();
         function showLoader() { document.getElementById('globalLoader').style.display = 'flex'; }
-        function autoSubmit() { if (document.getElementById('q').value.trim() !== "") { showLoader(); document.getElementById('searchForm').submit(); } }
-        function updateRad(val) { document.getElementById('radDisplay').textContent = val + 'm'; }
-        function updateLim(val) { document.getElementById('limDisplay').textContent = val; }
-
+        function autoSubmit() { showLoader(); document.getElementById('searchForm').submit(); }
+        
         function getGPS() {
             if (navigator.geolocation) {
+                showLoader();
                 navigator.geolocation.getCurrentPosition((pos) => {
-                    document.getElementById('q').value = pos.coords.latitude.toFixed(5) + "," + pos.coords.longitude.toFixed(5);
-                    autoSubmit();
+                    const qInput = document.getElementById('q') || document.getElementById('q_inline');
+                    qInput.value = pos.coords.latitude.toFixed(5) + "," + pos.coords.longitude.toFixed(5);
+                    document.getElementById('searchForm').submit();
+                }, () => {
+                    alert("Location access denied.");
+                    document.getElementById('globalLoader').style.display = 'none';
                 });
             }
         }
@@ -174,6 +175,16 @@
         var map = L.map('map', {zoomControl: false}).setView([{{ search_lat }}, {{ search_lon }}], 15);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
         
+        // --- ADDED RADIUS OVERLAY ---
+        var radiusOverlay = L.circle([{{ search_lat }}, {{ search_lon }}], {
+            color: '#1d4ed8',      // Blue border
+            fillColor: '#1d4ed8',  // Blue fill
+            fillOpacity: 0.05,     // Faint overlay
+            weight: 2,             // Thin line
+            dashArray: '5, 10',    // Dashed border for a technical look
+            radius: {{ radius }}   // Dynamic radius from backend
+        }).addTo(map);
+
         var pts = [[{{ search_lat }}, {{ search_lon }}]];
         L.circleMarker(pts[0], { radius: 10, color: '#334155', weight: 4, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
 
@@ -181,14 +192,12 @@
             (function(){
                 var idx = {{ loop.index0 }};
                 var p = [{{ stop.lat }}, {{ stop.lon }}]; pts.push(p);
-                var pinColor = '#000000'; // Rail/Overground Default
-                var mode = '{{ stop.primary_mode }}';
+                var pinColor = '#000000';
                 if ({{ 'true' if stop.is_bike else 'false' }}) pinColor = '#10b981';
-                else if (mode === 'bus') pinColor = '#dc241f';
-                else if (mode === 'tube') pinColor = '#0019a8';
+                else if ('{{ stop.primary_mode }}' === 'bus') pinColor = '#dc241f';
+                else if ('{{ stop.primary_mode }}' === 'tube') pinColor = '#0019a8';
 
                 var m = L.circleMarker(p, { radius: 8, color: pinColor, weight: 3, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
-                m.bindTooltip("{{ stop.commonName }}", { direction: 'top', offset: [0, -5] });
                 m.on('click', function() {
                     document.querySelectorAll('.stop-card').forEach(c => c.classList.remove('highlight'));
                     const card = document.getElementById('card-' + idx);
@@ -197,8 +206,9 @@
                 });
             })();
         {% endfor %}
-
-        if (pts.length > 1) { map.fitBounds(L.latLngBounds(pts), { padding: [50, 50] }); }
+        
+        // Auto-fit map to show the entire search radius circle
+        map.fitBounds(radiusOverlay.getBounds(), { padding: [20, 20] });
         {% endif %}
     </script>
 </body>
